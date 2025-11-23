@@ -1,0 +1,5 @@
+{
+  "name": "MarkSmart Editor",
+  "description": "A powerful, split-pane Markdown editor with local file management and AI-powered writing assistance.",
+  "requestFramePermissions": []
+}
