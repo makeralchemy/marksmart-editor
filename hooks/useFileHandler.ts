@@ -34,9 +34,14 @@ export const useFileHandler = () => {
       return;
     }
 
+    let useFallback = true;
+
     try {
       // Try File System Access API
+      // Note: specific checks for cross-origin isolation might be needed in some envs, 
+      // but try/catch is the most robust way to handle 'SecurityError'.
       if ('showOpenFilePicker' in window) {
+        useFallback = false; // Attempting API
         const handles = await window.showOpenFilePicker({
           multiple: false,
           types: [{ description: 'Markdown Files', accept: { 'text/markdown': ['.md', '.markdown'] } }]
@@ -56,16 +61,16 @@ export const useFileHandler = () => {
         }
       } 
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        console.error('File access error:', err);
+      if (err.name === 'AbortError') {
+        // User cancelled the picker
+        return;
       }
-      // If user aborted, do nothing. If error wasn't abort, we could try fallback,
-      // but usually 'AbortError' is the only common one here.
-      return;
+      console.warn('File System Access API failed or blocked, falling back to input:', err);
+      useFallback = true;
     }
 
     // Fallback: Use hidden file input
-    if (fileInputRef.current) {
+    if (useFallback && fileInputRef.current) {
       fileInputRef.current.click();
     }
   }, [fileState.isDirty]);
@@ -91,26 +96,6 @@ export const useFileHandler = () => {
     }
   }, []);
 
-  const saveFile = useCallback(async () => {
-    // If we have a handle, write to it
-    if (fileState.handle) {
-      try {
-        const writable = await fileState.handle.createWritable();
-        await writable.write(fileState.content);
-        await writable.truncate(new Blob([fileState.content]).size);
-        await writable.close(); // Important to close
-        setFileState(prev => ({ ...prev, isDirty: false }));
-        return;
-      } catch (err) {
-        console.error("Failed to save:", err);
-        alert("Failed to save file. Try 'Save As'.");
-      }
-    }
-    
-    // If no handle, trigger Save As
-    return saveFileAs();
-  }, [fileState.handle, fileState.content]);
-
   const saveFileAs = useCallback(async () => {
     try {
       if ('showSaveFilePicker' in window) {
@@ -132,11 +117,10 @@ export const useFileHandler = () => {
         return;
       }
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        console.error("Save As failed:", err);
-      } else {
+      if (err.name === 'AbortError') {
         return; // User cancelled
       }
+      console.warn("Save As API failed, falling back to download:", err);
     }
 
     // Fallback: Download Blob
@@ -151,6 +135,26 @@ export const useFileHandler = () => {
     URL.revokeObjectURL(url);
     setFileState(prev => ({ ...prev, isDirty: false }));
   }, [fileState.content, fileState.name]);
+
+  const saveFile = useCallback(async () => {
+    // If we have a handle, write to it
+    if (fileState.handle) {
+      try {
+        const writable = await fileState.handle.createWritable();
+        await writable.write(fileState.content);
+        await writable.truncate(new Blob([fileState.content]).size);
+        await writable.close(); // Important to close
+        setFileState(prev => ({ ...prev, isDirty: false }));
+        return;
+      } catch (err) {
+        console.error("Failed to save to handle:", err);
+        // Fall through to saveFileAs logic if handle write fails
+      }
+    }
+    
+    // If no handle or handle write failed, trigger Save As
+    return saveFileAs();
+  }, [fileState.handle, fileState.content, saveFileAs]);
 
   return {
     fileState,
